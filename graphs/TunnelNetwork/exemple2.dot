@@ -4,7 +4,7 @@ u1 [label="4→4\n6→6"]
 u2 [label="4→4\n6→6"]
 u3 [label="4↑46"]
 d [label="46↓4"]
-end [shape = invtriangle][label="4→4"]
+end [shape = invtriangle][label=4→4]
 s -> u1;
 u1 -> u2;
 u2 -> u3;
