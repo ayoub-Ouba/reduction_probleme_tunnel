@@ -62,7 +62,6 @@ int get_stack_size(int length)
 
 /**
  * @brief Crée la contrainte φ₁ : Unicité de l'état à chaque position
- * 
  * Cette fonction garantit qu'à chaque position du chemin, on se trouve
  * dans exactement un état (un couple nœud-hauteur).
  * 
@@ -71,35 +70,28 @@ int get_stack_size(int length)
  * @param length La longueur du chemin recherché
  * @return Z3_ast La formule de contrainte complète
  */
-Z3_ast unicité(Z3_context ctx, TunnelNetwork reseau, int length)
-{
+Z3_ast unicité(Z3_context ctx, TunnelNetwork reseau, int length){
     int nombre_noeuds = tn_get_num_nodes(reseau);
     int taille_max_pile = get_stack_size(length);
     
    //Créer un tableau pour stocker les contraintes
     Z3_ast position_constraints[length + 1];
      // Pour chaque position i, créer la contrainte d'unicité
-    for (int i = 0; i <= length; i++)
-    {
-        
+    for (int i = 0; i <= length; i++){
         int nombre_etat_possibles = nombre_noeuds * taille_max_pile;
         //Créer un tableau contient toutes les variables x_{nœud,position,hauteur} pour position i
-        Z3_ast vars[nombre_etat_possibles];
-        int idx = 0;
+        Z3_ast x[nombre_etat_possibles];
+        int cnt = 0;
         
-        for (int node = 0; node < nombre_noeuds; node++)
-        {
-            for (int h = 0; h < taille_max_pile; h++)
-            {
+        for (int node = 0; node < nombre_noeuds; node++){
+            for (int h = 0; h < taille_max_pile; h++){
                 // tn_path_variable creér notre variable booléan x(node,i,h)
-                vars[idx++] = tn_path_variable(ctx, node, i, h);
+                x[cnt++] = tn_path_variable(ctx, node, i, h);
             }
         }
-        
         //Parmi ces variables, EXACTEMENT UNE doit être vraie** (var1 ou var2 ou .... ou varN) pour une position i
-        position_constraints[i] = uniqueFormula(ctx, vars, nombre_etat_possibles);
+        position_constraints[i] = uniqueFormula(ctx, x, nombre_etat_possibles);
     }
-    
     return Z3_mk_and(ctx, length + 1, position_constraints);
 }
 
@@ -116,11 +108,9 @@ Z3_ast unicité(Z3_context ctx, TunnelNetwork reseau, int length)
  * @param longueur Longueur du chemin à explorer
  * @return Z3_ast La formule de contrainte combinée (conjonction des 4 conditions)
  */
-Z3_ast contrainte_depart_arrivee(Z3_context ctx, TunnelNetwork reseau, int length)
-{
+Z3_ast contrainte_depart_arrivee(Z3_context ctx, TunnelNetwork reseau, int length){
     int depart = tn_get_initial(reseau);
     int arriv = tn_get_final(reseau);
-    
     Z3_ast constraints[4];
     
     // au nœud depart, hauteur 0
@@ -134,7 +124,6 @@ Z3_ast contrainte_depart_arrivee(Z3_context ctx, TunnelNetwork reseau, int lengt
     
     // pile contient 4 à hauteur 0
     constraints[3] = tn_4_variable(ctx, length, 0);
-    
     return Z3_mk_and(ctx, 4, constraints);
 }
 
@@ -157,267 +146,210 @@ Z3_ast creer_contraintes_transitions(Z3_context ctx, TunnelNetwork reseau, int l
 {
     int nombre_noeuds = tn_get_num_nodes(reseau);
     int taille_max_pile = get_stack_size(length);
-    
+
     // Allouer dynamiquement sur le tas au lieu de la pile
     int max_constraints = length * nombre_noeuds * nombre_noeuds * taille_max_pile * 30;
-    Z3_ast *all_constraints = (Z3_ast *)malloc(max_constraints * sizeof(Z3_ast));
-    if (all_constraints == NULL) {
+    Z3_ast *toutes_contraintes = (Z3_ast *)malloc(max_constraints * sizeof(Z3_ast));
+    if (toutes_contraintes == NULL) {
         fprintf(stderr, "Erreur: impossible d'allouer la mémoire pour les contraintes\n");
         exit(1);
     }
-    
-    int num_constraints = 0;
-    
-    // ====================================================================
+
+    int nb_contraintes = 0;
     // CONTRAINTE 1 : Interdire les transitions avec changement de hauteur invalide
     // Seuls les changements de hauteur -1, 0, +1 sont autorisés
-    // ====================================================================
     for (int i = 0; i < length; i++){
-        for (int u = 0; u < nombre_noeuds; u++){
-            for (int h = 0; h < taille_max_pile; h++)
-            {
-                Z3_ast at_u = tn_path_variable(ctx, u, i, h);
+        for (int noeud = 0; noeud < nombre_noeuds; noeud++){
+            for (int h = 0; h < taille_max_pile; h++){
+                Z3_ast x_noeud = tn_path_variable(ctx, noeud, i, h);
                 
-                for (int v = 0; v < nombre_noeuds; v++)
-                {
-                    for (int h_prime = 0; h_prime < taille_max_pile; h_prime++)
-                    {
+                for (int noeud_suiv = 0; noeud_suiv < nombre_noeuds; noeud_suiv++){
+                    for (int h_prime = 0; h_prime < taille_max_pile; h_prime++){
                         int delta = h_prime - h;
                         // Si le changement de hauteur est invalide (pas -1, 0, ou +1)
-                        if (delta < -1 || delta > 1)
-                        {
-                            Z3_ast at_v = tn_path_variable(ctx, v, i + 1, h_prime);
-                            Z3_ast forbidden = Z3_mk_and(ctx, 2, (Z3_ast[]){at_u, at_v});
-                            all_constraints[num_constraints++] = Z3_mk_not(ctx, forbidden);
+                        if (delta < -1 || delta > 1){
+                            Z3_ast x_noeud_suiv = tn_path_variable(ctx, noeud_suiv, i + 1, h_prime);
+                            Z3_ast forbidden = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud, x_noeud_suiv});
+                            toutes_contraintes[nb_contraintes++] = Z3_mk_not(ctx, forbidden);
                         }
                     }
                 }
             }
         }
     }
-    
-    // ====================================================================
     // CONTRAINTE 2 : Interdire les transitions vers des nœuds non-voisins
     // CONTRAINTE 3 : Vérifier la cohérence pile-action pour les transitions valides
-    // ====================================================================
+
     for (int i = 0; i < length; i++){
-        for (int u = 0; u < nombre_noeuds; u++){
-            for (int h = 0; h < taille_max_pile; h++)
-            {
-                Z3_ast at_u = tn_path_variable(ctx, u, i, h);
-                
-                for (int v = 0; v < nombre_noeuds; v++)
-                {
-                    // Si l'arête u->v N'EXISTE PAS
-                    if (!tn_is_edge(reseau, u, v))
-                    {
-                        // Interdire TOUTES les transitions vers v depuis u
-                        // TRANSMIT (hauteur reste h)
-                        Z3_ast at_v_same = tn_path_variable(ctx, v, i + 1, h);
-                        Z3_ast forbidden_trans = Z3_mk_and(ctx, 2, (Z3_ast[]){at_u, at_v_same});
-                        all_constraints[num_constraints++] = Z3_mk_not(ctx, forbidden_trans);
-                        
-                        // PUSH (hauteur devient h+1)
-                        if (h + 1 < taille_max_pile)
-                        {
-                            Z3_ast at_v_push = tn_path_variable(ctx, v, i + 1, h + 1);
-                            Z3_ast forbidden_push = Z3_mk_and(ctx, 2, (Z3_ast[]){at_u, at_v_push});
-                            all_constraints[num_constraints++] = Z3_mk_not(ctx, forbidden_push);
+        for (int noeud = 0; noeud < nombre_noeuds; noeud++){
+            for (int haut = 0; haut < taille_max_pile; haut++){
+                Z3_ast x_noeud = tn_path_variable(ctx, noeud, i, haut);
+                for (int noeud_suiv = 0; noeud_suiv < nombre_noeuds; noeud_suiv++){
+                    // Si l'arête noeud->noeud_suiv N'EXISTE PAS
+                    if (!tn_is_edge(reseau, noeud, noeud_suiv)){
+                        // Interdire TOUTES les transitions vers noeud_suiv depuis noeud
+
+                        // TRANSMIT
+                        Z3_ast etat_suivant_meme_hauteur = tn_path_variable(ctx, noeud_suiv, i + 1, haut);
+                        Z3_ast contrainte_interdite_transmission = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud, etat_suivant_meme_hauteur});
+                        toutes_contraintes[nb_contraintes++] = Z3_mk_not(ctx, contrainte_interdite_transmission);
+                        // PUSH 
+                        if (haut + 1 < taille_max_pile){
+                            Z3_ast etat_suivant_apres_push = tn_path_variable(ctx, noeud_suiv, i + 1, haut + 1);
+                            Z3_ast contrainte_interdite_push = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud, etat_suivant_apres_push});
+                            toutes_contraintes[nb_contraintes++] = Z3_mk_not(ctx, contrainte_interdite_push);
                         }
-                        
-                        // POP (hauteur devient h-1)
-                        if (h > 0)
-                        {
-                            Z3_ast at_v_pop = tn_path_variable(ctx, v, i + 1, h - 1);
-                            Z3_ast forbidden_pop = Z3_mk_and(ctx, 2, (Z3_ast[]){at_u, at_v_pop});
-                            all_constraints[num_constraints++] = Z3_mk_not(ctx, forbidden_pop);
+                        // POP 
+                        if (haut > 0){
+                            Z3_ast etat_suivant_apres_pop = tn_path_variable(ctx, noeud_suiv, i + 1, haut - 1);
+                            Z3_ast contrainte_interdite_pop = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud, etat_suivant_apres_pop});
+                            toutes_contraintes[nb_contraintes++] = Z3_mk_not(ctx, contrainte_interdite_pop);
                         }
-                        
                         continue;
                     }
-                    
-                    // L'arête u->v EXISTE, vérifier la cohérence des actions
-                    // ---- TRANSMIT (hauteur reste h) ----
-                    Z3_ast at_v_trans = tn_path_variable(ctx, v, i + 1, h);
-                    Z3_ast trans_transition = Z3_mk_and(ctx, 2, (Z3_ast[]){at_u, at_v_trans});
-                    
-                    Z3_ast trans_conditions[10];
-                    int nb_trans_cond = 0;
-                    
-                    if (tn_node_has_action(reseau, u, transmit_4))
-                    {
-                        trans_conditions[nb_trans_cond++] = tn_4_variable(ctx, i, h);
+                    // L'arête noeud->noeud_suiv EXISTE, vérifier la cohérence des actions
+
+                    // ---- TRANSMIT ----
+                    Z3_ast etat_suivant_meme_hauteur = tn_path_variable(ctx, noeud_suiv, i + 1, haut);
+                    Z3_ast contrainte_transmission = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud, etat_suivant_meme_hauteur});
+                    Z3_ast conditions_transmit[10];
+                    int nb_conditions_transmit = 0;
+                    if (tn_node_has_action(reseau, noeud, transmit_4)){
+                        conditions_transmit[nb_conditions_transmit++] = tn_4_variable(ctx, i, haut);
                     }
-                    if (tn_node_has_action(reseau, u, transmit_6))
-                    {
-                        trans_conditions[nb_trans_cond++] = tn_6_variable(ctx, i, h);
+                    if (tn_node_has_action(reseau, noeud, transmit_6)){
+                        conditions_transmit[nb_conditions_transmit++] = tn_6_variable(ctx, i, haut);
                     }
-                    
-                    if (nb_trans_cond > 0)
-                    {
-                        Z3_ast trans_ok = Z3_mk_or(ctx, nb_trans_cond, trans_conditions);
-                        all_constraints[num_constraints++] = Z3_mk_implies(ctx, trans_transition, trans_ok);
+                    if (nb_conditions_transmit > 0){
+                        Z3_ast transmission_valide = Z3_mk_or(ctx, nb_conditions_transmit, conditions_transmit);
+                        toutes_contraintes[nb_contraintes++] = Z3_mk_implies(ctx, contrainte_transmission, transmission_valide);
                     }
-                    else
-                    {
+                    else{
                         // Si aucune action TRANSMIT n'est disponible, interdire cette transition
-                        all_constraints[num_constraints++] = Z3_mk_not(ctx, trans_transition);
+                        toutes_contraintes[nb_contraintes++] = Z3_mk_not(ctx, contrainte_transmission);
                     }
-                    
-                    // ---- PUSH (hauteur devient h+1) ----
-                    if (h + 1 < taille_max_pile)
-                    {
-                        Z3_ast at_v_push = tn_path_variable(ctx, v, i + 1, h + 1);
-                        Z3_ast push_transition = Z3_mk_and(ctx, 2, (Z3_ast[]){at_u, at_v_push});
+                    // ---- PUSH ----
+                    if (haut + 1 < taille_max_pile){
+                        Z3_ast etat_suivant_apres_push = tn_path_variable(ctx, noeud_suiv, i + 1, haut + 1);
+                        Z3_ast transition_push  = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud, etat_suivant_apres_push});
+                        Z3_ast conditions_push[10];
+                        int nb_conditions_push = 0;
                         
-                        Z3_ast push_conditions[10];
-                        int nb_push_cond = 0;
-                        
-                        if (tn_node_has_action(reseau, u, push_4_4))
-                        {
+                        if (tn_node_has_action(reseau, noeud, push_4_4)){
                             Z3_ast cond = Z3_mk_and(ctx, 2, (Z3_ast[]){
-                                tn_4_variable(ctx, i, h),
-                                tn_4_variable(ctx, i + 1, h + 1)
+                                tn_4_variable(ctx, i, haut),
+                                tn_4_variable(ctx, i + 1, haut + 1)
                             });
-                            push_conditions[nb_push_cond++] = cond;
+                            conditions_push[nb_conditions_push++] = cond;
                         }
-                        if (tn_node_has_action(reseau, u, push_4_6))
-                        {
+                        if (tn_node_has_action(reseau, noeud, push_4_6)){
                             Z3_ast cond = Z3_mk_and(ctx, 2, (Z3_ast[]){
-                                tn_4_variable(ctx, i, h),
-                                tn_6_variable(ctx, i + 1, h + 1)
+                                tn_4_variable(ctx, i, haut),
+                                tn_6_variable(ctx, i + 1, haut + 1)
                             });
-                            push_conditions[nb_push_cond++] = cond;
+                            conditions_push[nb_conditions_push++] = cond;
                         }
-                        if (tn_node_has_action(reseau, u, push_6_4))
-                        {
+                        if (tn_node_has_action(reseau, noeud, push_6_4)){
                             Z3_ast cond = Z3_mk_and(ctx, 2, (Z3_ast[]){
-                                tn_6_variable(ctx, i, h),
-                                tn_4_variable(ctx, i + 1, h + 1)
+                                tn_6_variable(ctx, i, haut),
+                                tn_4_variable(ctx, i + 1, haut + 1)
                             });
-                            push_conditions[nb_push_cond++] = cond;
+                            conditions_push[nb_conditions_push++] = cond;
                         }
-                        if (tn_node_has_action(reseau, u, push_6_6))
-                        {
+                        if (tn_node_has_action(reseau, noeud, push_6_6)){
                             Z3_ast cond = Z3_mk_and(ctx, 2, (Z3_ast[]){
-                                tn_6_variable(ctx, i, h),
-                                tn_6_variable(ctx, i + 1, h + 1)
+                                tn_6_variable(ctx, i, haut),
+                                tn_6_variable(ctx, i + 1, haut + 1)
                             });
-                            push_conditions[nb_push_cond++] = cond;
+                            conditions_push[nb_conditions_push++] = cond;
                         }
-                        
-                        if (nb_push_cond > 0)
-                        {
-                            Z3_ast push_ok = Z3_mk_or(ctx, nb_push_cond, push_conditions);
-                            all_constraints[num_constraints++] = Z3_mk_implies(ctx, push_transition, push_ok);
+                        if (nb_conditions_push > 0){
+                            Z3_ast push_valide  = Z3_mk_or(ctx, nb_conditions_push, conditions_push);
+                            toutes_contraintes[nb_contraintes++] = Z3_mk_implies(ctx, transition_push , push_valide );
                         }
-                        else
-                        {
-                            all_constraints[num_constraints++] = Z3_mk_not(ctx, push_transition);
+                        else{
+                            toutes_contraintes[nb_contraintes++] = Z3_mk_not(ctx, transition_push );
                         }
                     }
-                    
-                    // ---- POP (hauteur devient h-1) ----
-                    if (h > 0)
-                    {
-                        Z3_ast at_v_pop = tn_path_variable(ctx, v, i + 1, h - 1);
-                        Z3_ast pop_transition = Z3_mk_and(ctx, 2, (Z3_ast[]){at_u, at_v_pop});
-                        
-                        Z3_ast pop_conditions[10];
-                        int nb_pop_cond = 0;
-                        
-                        if (tn_node_has_action(reseau, u, pop_4_4))
-                        {
+                    // ---- POP ----
+                    if (haut > 0){
+                        Z3_ast etat_suivant_apres_pop = tn_path_variable(ctx, noeud_suiv, i + 1, haut - 1);
+                        Z3_ast transition_pop = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud, etat_suivant_apres_pop});
+                        Z3_ast conditions_pop[10];
+                        int nb_conditions_pop = 0;
+                        if (tn_node_has_action(reseau, noeud, pop_4_4)){
                             Z3_ast cond = Z3_mk_and(ctx, 2, (Z3_ast[]){
-                                tn_4_variable(ctx, i, h),
-                                tn_4_variable(ctx, i, h - 1)
+                                tn_4_variable(ctx, i, haut),
+                                tn_4_variable(ctx, i, haut - 1)
                             });
-                            pop_conditions[nb_pop_cond++] = cond;
+                            conditions_pop[nb_conditions_pop++] = cond;
                         }
-                        if (tn_node_has_action(reseau, u, pop_4_6))
-                        {
+                        if (tn_node_has_action(reseau, noeud, pop_4_6)) {
                             Z3_ast cond = Z3_mk_and(ctx, 2, (Z3_ast[]){
-                                tn_6_variable(ctx, i, h),
-                                tn_4_variable(ctx, i, h - 1)
+                                tn_6_variable(ctx, i, haut),
+                                tn_4_variable(ctx, i, haut - 1)
                             });
-                            pop_conditions[nb_pop_cond++] = cond;
+                            conditions_pop[nb_conditions_pop++] = cond;
                         }
-                        if (tn_node_has_action(reseau, u, pop_6_4))
-                        {
+                        if (tn_node_has_action(reseau, noeud, pop_6_4)){
                             Z3_ast cond = Z3_mk_and(ctx, 2, (Z3_ast[]){
-                                tn_4_variable(ctx, i, h),
-                                tn_6_variable(ctx, i, h - 1)
+                                tn_4_variable(ctx, i, haut),
+                                tn_6_variable(ctx, i, haut - 1)
                             });
-                            pop_conditions[nb_pop_cond++] = cond;
+                            conditions_pop[nb_conditions_pop++] = cond;
                         }
-                        if (tn_node_has_action(reseau, u, pop_6_6))
-                        {
+                        if (tn_node_has_action(reseau, noeud, pop_6_6)){
                             Z3_ast cond = Z3_mk_and(ctx, 2, (Z3_ast[]){
-                                tn_6_variable(ctx, i, h),
-                                tn_6_variable(ctx, i, h - 1)
+                                tn_6_variable(ctx, i, haut),
+                                tn_6_variable(ctx, i, haut - 1)
                             });
-                            pop_conditions[nb_pop_cond++] = cond;
+                            conditions_pop[nb_conditions_pop++] = cond;
                         }
-                        
-                        if (nb_pop_cond > 0)
-                        {
-                            Z3_ast pop_ok = Z3_mk_or(ctx, nb_pop_cond, pop_conditions);
-                            all_constraints[num_constraints++] = Z3_mk_implies(ctx, pop_transition, pop_ok);
+                        if (nb_conditions_pop > 0){
+                            Z3_ast pop_valide  = Z3_mk_or(ctx, nb_conditions_pop, conditions_pop);
+                            toutes_contraintes[nb_contraintes++] = Z3_mk_implies(ctx, transition_pop, pop_valide );
                         }
-                        else
-                        {
-                            all_constraints[num_constraints++] = Z3_mk_not(ctx, pop_transition);
+                        else{
+                            toutes_contraintes[nb_contraintes++] = Z3_mk_not(ctx, transition_pop);
                         }
                     }
                 }
                 
-                int nb_successors = 0;
-                Z3_ast successors[nombre_noeuds * 3];
-                
-                for (int v = 0; v < nombre_noeuds; v++)
-                {
-                    if (!tn_is_edge(reseau, u, v))
+                int nb_transitions_possibles = 0;
+                Z3_ast transitions_possibles[nombre_noeuds * 3];
+                for (int noeud_suiv = 0; noeud_suiv < nombre_noeuds; noeud_suiv++){
+                    if (!tn_is_edge(reseau,noeud, noeud_suiv))
                         continue;
                     
                     // TRANSMIT
-                    if (tn_node_has_action(reseau, u, transmit_4) || tn_node_has_action(reseau, u, transmit_6))
-                    {
-                        successors[nb_successors++] = tn_path_variable(ctx, v, i + 1, h);
+                    if (tn_node_has_action(reseau,noeud, transmit_4) || tn_node_has_action(reseau,noeud, transmit_6)){
+                        transitions_possibles[nb_transitions_possibles++] = tn_path_variable(ctx, noeud_suiv, i + 1, haut);
                     }
-                    
                     // PUSH
-                    if (h + 1 < taille_max_pile && 
-                        (tn_node_has_action(reseau, u, push_4_4) || tn_node_has_action(reseau, u, push_4_6) ||
-                         tn_node_has_action(reseau, u, push_6_4) || tn_node_has_action(reseau, u, push_6_6)))
-                    {
-                        successors[nb_successors++] = tn_path_variable(ctx, v, i + 1, h + 1);
+                    if (haut + 1 < taille_max_pile && (tn_node_has_action(reseau,noeud, push_4_4) || tn_node_has_action(reseau,noeud, push_4_6) ||
+                         tn_node_has_action(reseau,noeud, push_6_4) || tn_node_has_action(reseau,noeud, push_6_6))){
+                        transitions_possibles[nb_transitions_possibles++] = tn_path_variable(ctx, noeud_suiv, i + 1, haut + 1);
                     }
-                    
                     // POP
-                    if (h > 0 &&
-                        (tn_node_has_action(reseau, u, pop_4_4) || tn_node_has_action(reseau, u, pop_4_6) ||
-                         tn_node_has_action(reseau, u, pop_6_4) || tn_node_has_action(reseau, u, pop_6_6)))
-                    {
-                        successors[nb_successors++] = tn_path_variable(ctx, v, i + 1, h - 1);
+                    if (haut > 0 && (tn_node_has_action(reseau,noeud, pop_4_4) || tn_node_has_action(reseau,noeud, pop_4_6) ||
+                         tn_node_has_action(reseau,noeud, pop_6_4) || tn_node_has_action(reseau,noeud, pop_6_6))){
+                        transitions_possibles[nb_transitions_possibles++] = tn_path_variable(ctx, noeud_suiv, i + 1, haut - 1);
                     }
                 }
-                
-                if (nb_successors > 0)
-                {
-                    Z3_ast must_go_somewhere = Z3_mk_or(ctx, nb_successors, successors);
-                    all_constraints[num_constraints++] = Z3_mk_implies(ctx, at_u, must_go_somewhere);
+                if (nb_transitions_possibles > 0){
+                    Z3_ast must_go_somewhere = Z3_mk_or(ctx, nb_transitions_possibles, transitions_possibles);
+                    toutes_contraintes[nb_contraintes++] = Z3_mk_implies(ctx, x_noeud, must_go_somewhere);
                 }
             }
         }
     }
-    
-    Z3_ast result = Z3_mk_and(ctx, num_constraints, all_constraints);
-    
+    Z3_ast result = Z3_mk_and(ctx, nb_contraintes, toutes_contraintes);
     // Libérer la mémoire allouée
-    free(all_constraints);
+    free(toutes_contraintes);
     
     return result;
 }
+   
 /**
  * @brief Crée la contrainte φ₄ : La pile est bien définie (chaque cellule de la pile contient soit 4, soit 6, jamais les deux)
  * Cette fonction garantit que chaque cellule utilisée de la pile contient exactement un protocole :
@@ -430,28 +362,21 @@ Z3_ast creer_contraintes_transitions(Z3_context ctx, TunnelNetwork reseau, int l
  * @param length Longueur du chemin à explorer
  * @return Z3_ast La formule de contrainte combinée
  */
-Z3_ast creer_contrainte_pile_bien_definie(Z3_context ctx, TunnelNetwork reseau, int length)
-{
+Z3_ast creer_contrainte_pile_bien_definie(Z3_context ctx, TunnelNetwork reseau, int length){
     int nombre_noeuds = tn_get_num_nodes(reseau);
     int taille_max_pile= get_stack_size(length);
-    
     int nombre_contraintes  = 0;
     Z3_ast toutes_contraintes[(length + 1) * taille_max_pile* taille_max_pile];
     
-    for (int i = 0; i <= length; i++)
-    {
-        for (int h = 0; h < taille_max_pile; h++)
-        {
+    for (int i = 0; i <= length; i++){
+        for (int h = 0; h < taille_max_pile; h++){
             // Condition: si la pile est de hauteur h
             int nb_vars_hauteur = 0;
             Z3_ast variables_hauteur[taille_max_pile * nombre_noeuds];
             
-            for (int node = 0; node < nombre_noeuds; node++)
-            {
-                for (int height = 0; height < taille_max_pile; height++)
-                {
-                    if (height == h)
-                    {
+            for (int node = 0; node < nombre_noeuds; node++){
+                for (int height = 0; height < taille_max_pile; height++){
+                    if (height == h){
                         variables_hauteur[nb_vars_hauteur++] = tn_path_variable(ctx, node, i, h);
                     }
                 }
@@ -462,9 +387,8 @@ Z3_ast creer_contrainte_pile_bien_definie(Z3_context ctx, TunnelNetwork reseau, 
             int nb_contraintes_cellules  = 0;
             Z3_ast contraintes_cellules[taille_max_pile];
             
-            for (int k = 0; k <= h; k++)
-            {
-                // La cellule contient soit 4 soit 6 (exclusif)
+            for (int k = 0; k <= h; k++){
+                // La cellule contient soit 4 soit 6 
                 Z3_ast contient_4  = tn_4_variable(ctx, i, k);
                 Z3_ast contient_6 = tn_6_variable(ctx, i, k);
                 
@@ -487,237 +411,198 @@ Z3_ast creer_contrainte_pile_bien_definie(Z3_context ctx, TunnelNetwork reseau, 
  *  hauteur de pile, le contenu du sommet est cohérent avec l’opération (push, pop ou transmit) effectuée par le nœud visité. 
  * Elle encode donc correctement la sémantique de la pile dans le solveur Z3.
  * @param ctx Z3 context
- * @param network The tunnel network
+ * @param reseau The tunnel network
  * @param length Path length
  * @return Z3_ast The constraint formula
  */
-Z3_ast create_top_operation_constraint(Z3_context ctx, TunnelNetwork network, int length)
-{
-    int num_nodes = tn_get_num_nodes(network);
-    int stack_size = get_stack_size(length);
+Z3_ast create_top_operation_constraint(Z3_context ctx, TunnelNetwork reseau, int length){
+    int nombre_noeuds= tn_get_num_nodes(reseau);
+    int taille_max_pile= get_stack_size(length);
     
-    int num_constraints = 0;
-    Z3_ast all_constraints[length * num_nodes * num_nodes * stack_size * 15];
+    int nombre_contraintes = 0;
+    Z3_ast toutes_contraintes[length * nombre_noeuds* nombre_noeuds* taille_max_pile* 15];
     
-    for (int i = 0; i < length; i++)
-    {
-        for (int u = 0; u < num_nodes; u++)
-        {
-            for (int v = 0; v < num_nodes; v++)
-            {
-                if (!tn_is_edge(network, u, v))
+    for (int i = 0; i < length; i++){
+        for (int noeud= 0; noeud< nombre_noeuds; noeud++){
+            for (int noeud_suiv= 0; noeud_suiv< nombre_noeuds; noeud_suiv++){
+                if (!tn_is_edge(reseau, noeud,noeud_suiv))
                     continue;
-                
-                for (int h = 0; h < stack_size; h++)
-                {
-                    Z3_ast at_u = tn_path_variable(ctx, u, i, h);
+                for (int haut = 0; haut < taille_max_pile; haut++){
+                    Z3_ast x_noeud = tn_path_variable(ctx, noeud, i, haut);
                     
                     // === TRANSMIT_4 ===
-                    if (tn_node_has_action(network, u, transmit_4))
-                    {
-                        Z3_ast at_v = tn_path_variable(ctx, v, i + 1, h);
-                        Z3_ast transition = Z3_mk_and(ctx, 2, (Z3_ast[]){at_u, at_v});
-                        Z3_ast top_is_4 = tn_4_variable(ctx, i, h);
-                        all_constraints[num_constraints++] = Z3_mk_implies(ctx, transition, top_is_4);
+                    if (tn_node_has_action(reseau, noeud, transmit_4)){
+                        Z3_ast x_noued_suiv = tn_path_variable(ctx,noeud_suiv, i + 1, haut);
+                        Z3_ast transition = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud, x_noued_suiv});
+                        Z3_ast top_is_4 = tn_4_variable(ctx, i, haut);
+                        toutes_contraintes[nombre_contraintes++] = Z3_mk_implies(ctx, transition, top_is_4);
                     }
-                    
                     // === TRANSMIT_6 ===
-                    if (tn_node_has_action(network, u, transmit_6))
-                    {
-                        Z3_ast at_v = tn_path_variable(ctx, v, i + 1, h);
-                        Z3_ast transition = Z3_mk_and(ctx, 2, (Z3_ast[]){at_u, at_v});
-                        Z3_ast top_is_6 = tn_6_variable(ctx, i, h);
-                        all_constraints[num_constraints++] = Z3_mk_implies(ctx, transition, top_is_6);
+                    if (tn_node_has_action(reseau, noeud, transmit_6)){
+                        Z3_ast x_noued_suiv = tn_path_variable(ctx,noeud_suiv, i + 1, haut);
+                        Z3_ast transition = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud, x_noued_suiv});
+                        Z3_ast top_is_6 = tn_6_variable(ctx, i, haut);
+                        toutes_contraintes[nombre_contraintes++] = Z3_mk_implies(ctx, transition, top_is_6);
                     }
                     
-                    // === PUSH operations ===
-                    if (h + 1 < stack_size)
-                    {
-                        Z3_ast at_v_push = tn_path_variable(ctx, v, i + 1, h + 1);
-                        Z3_ast transition_push = Z3_mk_and(ctx, 2, (Z3_ast[]){at_u, at_v_push});
-                        
+                    // === PUSH ===
+                    if (haut + 1 < taille_max_pile){
+                        Z3_ast x_noued_suiv_push = tn_path_variable(ctx,noeud_suiv, i + 1, haut + 1);
+                        Z3_ast transition_push = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud, x_noued_suiv_push});
                         // PUSH_4_4: sommet actuel=4, nouveau sommet=4
-                        if (tn_node_has_action(network, u, push_4_4))
-                        {
+                        if (tn_node_has_action(reseau, noeud, push_4_4)){
                             Z3_ast conds[2] = {
-                                tn_4_variable(ctx, i, h),
-                                tn_4_variable(ctx, i + 1, h + 1)
+                                tn_4_variable(ctx, i, haut),
+                                tn_4_variable(ctx, i + 1, haut + 1)
                             };
-                            all_constraints[num_constraints++] = Z3_mk_implies(ctx, transition_push, Z3_mk_and(ctx, 2, conds));
+                            toutes_contraintes[nombre_contraintes++] = Z3_mk_implies(ctx, transition_push, Z3_mk_and(ctx, 2, conds));
                         }
-                        
                         // PUSH_4_6: sommet actuel=4, nouveau sommet=6
-                        if (tn_node_has_action(network, u, push_4_6))
-                        {
+                        if (tn_node_has_action(reseau, noeud, push_4_6)){
                             Z3_ast conds[2] = {
-                                tn_4_variable(ctx, i, h),
-                                tn_6_variable(ctx, i + 1, h + 1)
+                                tn_4_variable(ctx, i, haut),
+                                tn_6_variable(ctx, i + 1, haut + 1)
                             };
-                            all_constraints[num_constraints++] = Z3_mk_implies(ctx, transition_push, Z3_mk_and(ctx, 2, conds));
+                            toutes_contraintes[nombre_contraintes++] = Z3_mk_implies(ctx, transition_push, Z3_mk_and(ctx, 2, conds));
                         }
-                        
                         // PUSH_6_4: sommet actuel=6, nouveau sommet=4
-                        if (tn_node_has_action(network, u, push_6_4))
-                        {
+                        if (tn_node_has_action(reseau, noeud, push_6_4)){
                             Z3_ast conds[2] = {
-                                tn_6_variable(ctx, i, h),
-                                tn_4_variable(ctx, i + 1, h + 1)
+                                tn_6_variable(ctx, i, haut),
+                                tn_4_variable(ctx, i + 1, haut + 1)
                             };
-                            all_constraints[num_constraints++] = Z3_mk_implies(ctx, transition_push, Z3_mk_and(ctx, 2, conds));
+                            toutes_contraintes[nombre_contraintes++] = Z3_mk_implies(ctx, transition_push, Z3_mk_and(ctx, 2, conds));
                         }
-                        
                         // PUSH_6_6: sommet actuel=6, nouveau sommet=6
-                        if (tn_node_has_action(network, u, push_6_6))
-                        {
+                        if (tn_node_has_action(reseau, noeud, push_6_6)){
                             Z3_ast conds[2] = {
-                                tn_6_variable(ctx, i, h),
-                                tn_6_variable(ctx, i + 1, h + 1)
+                                tn_6_variable(ctx, i, haut),
+                                tn_6_variable(ctx, i + 1, haut + 1)
                             };
-                            all_constraints[num_constraints++] = Z3_mk_implies(ctx, transition_push, Z3_mk_and(ctx, 2, conds));
+                            toutes_contraintes[nombre_contraintes++] = Z3_mk_implies(ctx, transition_push, Z3_mk_and(ctx, 2, conds));
                         }
                     }
                     
-                    // === POP operations ===
-                    if (h > 0)
-                    {
-                        Z3_ast at_v_pop = tn_path_variable(ctx, v, i + 1, h - 1);
-                        Z3_ast transition_pop = Z3_mk_and(ctx, 2, (Z3_ast[]){at_u, at_v_pop});
-                        
+                    // === POP ===
+                    if (haut > 0){
+                        Z3_ast x_noued_suiv_pop = tn_path_variable(ctx,noeud_suiv, i + 1, haut - 1);
+                        Z3_ast transition_pop = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud, x_noued_suiv_pop});
                         // POP_4_4: sommet=4, sous-sommet=4
-                        if (tn_node_has_action(network, u, pop_4_4))
-                        {
+                        if (tn_node_has_action(reseau, noeud, pop_4_4)){
                             Z3_ast conds[2] = {
-                                tn_4_variable(ctx, i, h),
-                                tn_4_variable(ctx, i, h - 1)
+                                tn_4_variable(ctx, i, haut),
+                                tn_4_variable(ctx, i, haut - 1)
                             };
-                            all_constraints[num_constraints++] = Z3_mk_implies(ctx, transition_pop, Z3_mk_and(ctx, 2, conds));
+                            toutes_contraintes[nombre_contraintes++] = Z3_mk_implies(ctx, transition_pop, Z3_mk_and(ctx, 2, conds));
                         }
-                        
                         // POP_4_6: sommet=6, sous-sommet=4
-                        if (tn_node_has_action(network, u, pop_4_6))
-                        {
+                        if (tn_node_has_action(reseau, noeud, pop_4_6)){
                             Z3_ast conds[2] = {
-                                tn_6_variable(ctx, i, h),
-                                tn_4_variable(ctx, i, h - 1)
+                                tn_6_variable(ctx, i, haut),
+                                tn_4_variable(ctx, i, haut - 1)
                             };
-                            all_constraints[num_constraints++] = Z3_mk_implies(ctx, transition_pop, Z3_mk_and(ctx, 2, conds));
+                            toutes_contraintes[nombre_contraintes++] = Z3_mk_implies(ctx, transition_pop, Z3_mk_and(ctx, 2, conds));
                         }
-                        
                         // POP_6_4: sommet=4, sous-sommet=6
-                        if (tn_node_has_action(network, u, pop_6_4))
-                        {
+                        if (tn_node_has_action(reseau, noeud, pop_6_4)){
                             Z3_ast conds[2] = {
-                                tn_4_variable(ctx, i, h),
-                                tn_6_variable(ctx, i, h - 1)
+                                tn_4_variable(ctx, i, haut),
+                                tn_6_variable(ctx, i, haut - 1)
                             };
-                            all_constraints[num_constraints++] = Z3_mk_implies(ctx, transition_pop, Z3_mk_and(ctx, 2, conds));
+                            toutes_contraintes[nombre_contraintes++] = Z3_mk_implies(ctx, transition_pop, Z3_mk_and(ctx, 2, conds));
                         }
-                        
                         // POP_6_6: sommet=6, sous-sommet=6
-                        if (tn_node_has_action(network, u, pop_6_6))
-                        {
+                        if (tn_node_has_action(reseau, noeud, pop_6_6)){
                             Z3_ast conds[2] = {
-                                tn_6_variable(ctx, i, h),
-                                tn_6_variable(ctx, i, h - 1)
+                                tn_6_variable(ctx, i, haut),
+                                tn_6_variable(ctx, i, haut - 1)
                             };
-                            all_constraints[num_constraints++] = Z3_mk_implies(ctx, transition_pop, Z3_mk_and(ctx, 2, conds));
+                            toutes_contraintes[nombre_contraintes++] = Z3_mk_implies(ctx, transition_pop, Z3_mk_and(ctx, 2, conds));
                         }
                     }
                 }
             }
         }
     }
-    
-    return Z3_mk_and(ctx, num_constraints, all_constraints);
+    return Z3_mk_and(ctx, nombre_contraintes, toutes_contraintes);
 }
 
 /**
- * @brief Creates constraint φ₆: Stack evolution is correct
- * 
- * @param ctx Z3 context
- * @param network The tunnel network
- * @param length Path length
- * @return Z3_ast The constraint formula
+ * @brief Crée la contrainte φ₆ : évolution correcte de la pile
+ *
+ * Encode les règles d’évolution de la pile pour chaque nœud et chaque étape :
+ * - TRANSMIT : pile inchangée
+ * - PUSH : ajoute 4 ou 6 au sommet
+ * - POP : retire le sommet
+ *
+ * Les contraintes sont combinées pour garantir que la pile évolue correctement
+ * le long du chemin dans le réseau.
+ *
+ * @param ctx Contexte Z3
+ * @param reseau Réseau de tunnels avec actions des nœuds
+ * @param length Longueur du chemin
+ * @return Z3_ast Formule φ₆ représentant la contrainte
  */
-Z3_ast create_stack_evolution_constraint(Z3_context ctx, TunnelNetwork network, int length)
-{
-    int num_nodes = tn_get_num_nodes(network);
-    int stack_size = get_stack_size(length);
+
+Z3_ast create_stack_evolution_constraint(Z3_context ctx, TunnelNetwork reseau, int length){
+    int nombre_noeuds= tn_get_num_nodes(reseau);
+    int taille_max_pile= get_stack_size(length);
     
     int num_constraints = 0;
-    Z3_ast all_constraints[length * num_nodes * num_nodes * stack_size * 10];
+    Z3_ast all_constraints[length * nombre_noeuds * nombre_noeuds * taille_max_pile * 10];
     
-    // Pour chaque position i
-    for (int i = 0; i < length; i++)
-    {
-        // Pour chaque nœud u
-        for (int u = 0; u < num_nodes; u++)
-        {
-            // Pour chaque voisin v
-            for (int v = 0; v < num_nodes; v++)
-            {
-                if (!tn_is_edge(network, u, v))
+    for (int i = 0; i < length; i++){
+        for (int noeud= 0; noeud< nombre_noeuds; noeud++){
+            for (int noeud_suiv = 0; noeud_suiv < nombre_noeuds; noeud_suiv++){
+                if (!tn_is_edge(reseau, noeud, noeud_suiv))
                     continue;
                 
-                // Pour chaque hauteur h
-                for (int h = 0; h < stack_size; h++)
-                {
-                    Z3_ast at_u = tn_path_variable(ctx, u, i, h);
-                    
-                    // TRANSMIT: la pile reste identique
-                    if (tn_node_has_action(network, u, transmit_4) || tn_node_has_action(network, u, transmit_6))
-                    {
-                        Z3_ast at_v = tn_path_variable(ctx, v, i + 1, h);
-                        Z3_ast transition = Z3_mk_and(ctx, 2, (Z3_ast[]){at_u, at_v});
-                        
+                for (int haut = 0; haut < taille_max_pile; haut++){
+                    Z3_ast x_noeud = tn_path_variable(ctx, noeud, i, haut);
+
+                    // TRANSMIT:
+                    if (tn_node_has_action(reseau, noeud, transmit_4) || tn_node_has_action(reseau, noeud, transmit_6)){
+                        Z3_ast x_noeud_suiv = tn_path_variable(ctx, noeud_suiv, i + 1, haut);
+                        Z3_ast transition = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud, x_noeud_suiv});
                         // Toutes les cellules restent identiques
                         int num_preserved = 0;
-                        Z3_ast preserved[stack_size * 2];
+                        Z3_ast preserved[taille_max_pile * 2];
                         
-                        for (int k = 0; k <= h; k++)
-                        {
+                        for (int k = 0; k <= haut; k++){
                             preserved[num_preserved++] = Z3_mk_eq(ctx, tn_4_variable(ctx, i, k), tn_4_variable(ctx, i + 1, k));
                             preserved[num_preserved++] = Z3_mk_eq(ctx, tn_6_variable(ctx, i, k), tn_6_variable(ctx, i + 1, k));
                         }
-                        
                         Z3_ast preservation = Z3_mk_and(ctx, num_preserved, preserved);
                         all_constraints[num_constraints++] = Z3_mk_implies(ctx, transition, preservation);
                     }
                     
-                    // PUSH: ajoute un élément au sommet
-                    if (h + 1 < stack_size)
-                    {
+                    // PUSH
+                    if (haut + 1 < taille_max_pile){
                         // PUSH 4->4: ajoute 4 au sommet
-                        if (tn_node_has_action(network, u, push_4_4))
-                        {
-                            Z3_ast at_v = tn_path_variable(ctx, v, i + 1, h + 1);
-                            Z3_ast transition = Z3_mk_and(ctx, 2, (Z3_ast[]){at_u, at_v});
-                            
+                        if (tn_node_has_action(reseau, noeud, push_4_4)){
+                            Z3_ast x_noeud_suiv = tn_path_variable(ctx, noeud_suiv, i + 1, haut + 1);
+                            Z3_ast transition = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud, x_noeud_suiv});
                             int num_conds = 1;
-                            Z3_ast conds[stack_size * 2 + 1];
-                            conds[0] = tn_4_variable(ctx, i + 1, h + 1); // Nouveau sommet = 4
-                            
+                            Z3_ast conds[taille_max_pile * 2 + 1];
+                            conds[0] = tn_4_variable(ctx, i + 1, haut + 1); // Nouveau sommet = 4
                             // Reste de la pile inchangé
-                            for (int k = 0; k <= h; k++)
-                            {
+                            for (int k = 0; k <= haut; k++){
                                 conds[num_conds++] = Z3_mk_eq(ctx, tn_4_variable(ctx, i, k), tn_4_variable(ctx, i + 1, k));
                                 conds[num_conds++] = Z3_mk_eq(ctx, tn_6_variable(ctx, i, k), tn_6_variable(ctx, i + 1, k));
                             }
-                            
                             all_constraints[num_constraints++] = Z3_mk_implies(ctx, transition, Z3_mk_and(ctx, num_conds, conds));
                         }
                         
                         // PUSH 4->6: ajoute 6 au sommet
-                        if (tn_node_has_action(network, u, push_4_6))
-                        {
-                            Z3_ast at_v = tn_path_variable(ctx, v, i + 1, h + 1);
-                            Z3_ast transition = Z3_mk_and(ctx, 2, (Z3_ast[]){at_u, at_v});
+                        if (tn_node_has_action(reseau, noeud, push_4_6)){
+                            Z3_ast x_noeud_suiv = tn_path_variable(ctx, noeud_suiv, i + 1, haut + 1);
+                            Z3_ast transition = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud, x_noeud_suiv});
                             
                             int num_conds = 1;
-                            Z3_ast conds[stack_size * 2 + 1];
-                            conds[0] = tn_6_variable(ctx, i + 1, h + 1); // Nouveau sommet = 6
+                            Z3_ast conds[taille_max_pile * 2 + 1];
+                            conds[0] = tn_6_variable(ctx, i + 1, haut + 1); // Nouveau sommet = 6
                             
-                            for (int k = 0; k <= h; k++)
+                            for (int k = 0; k <= haut; k++)
                             {
                                 conds[num_conds++] = Z3_mk_eq(ctx, tn_4_variable(ctx, i, k), tn_4_variable(ctx, i + 1, k));
                                 conds[num_conds++] = Z3_mk_eq(ctx, tn_6_variable(ctx, i, k), tn_6_variable(ctx, i + 1, k));
@@ -726,18 +611,16 @@ Z3_ast create_stack_evolution_constraint(Z3_context ctx, TunnelNetwork network, 
                             all_constraints[num_constraints++] = Z3_mk_implies(ctx, transition, Z3_mk_and(ctx, num_conds, conds));
                         }
                         
-                        // PUSH 6->4 et PUSH 6->6 (même logique)
-                        if (tn_node_has_action(network, u, push_6_4))
-                        {
-                            Z3_ast at_v = tn_path_variable(ctx, v, i + 1, h + 1);
-                            Z3_ast transition = Z3_mk_and(ctx, 2, (Z3_ast[]){at_u, at_v});
+                        // PUSH 6->4 et PUSH 6->6 
+                        if (tn_node_has_action(reseau, noeud, push_6_4)){
+                            Z3_ast x_noeud_suiv = tn_path_variable(ctx, noeud_suiv, i + 1, haut + 1);
+                            Z3_ast transition = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud, x_noeud_suiv});
                             
                             int num_conds = 1;
-                            Z3_ast conds[stack_size * 2 + 1];
-                            conds[0] = tn_4_variable(ctx, i + 1, h + 1);
+                            Z3_ast conds[taille_max_pile * 2 + 1];
+                            conds[0] = tn_4_variable(ctx, i + 1, haut + 1);
                             
-                            for (int k = 0; k <= h; k++)
-                            {
+                            for (int k = 0; k <= haut; k++){
                                 conds[num_conds++] = Z3_mk_eq(ctx, tn_4_variable(ctx, i, k), tn_4_variable(ctx, i + 1, k));
                                 conds[num_conds++] = Z3_mk_eq(ctx, tn_6_variable(ctx, i, k), tn_6_variable(ctx, i + 1, k));
                             }
@@ -745,17 +628,15 @@ Z3_ast create_stack_evolution_constraint(Z3_context ctx, TunnelNetwork network, 
                             all_constraints[num_constraints++] = Z3_mk_implies(ctx, transition, Z3_mk_and(ctx, num_conds, conds));
                         }
                         
-                        if (tn_node_has_action(network, u, push_6_6))
-                        {
-                            Z3_ast at_v = tn_path_variable(ctx, v, i + 1, h + 1);
-                            Z3_ast transition = Z3_mk_and(ctx, 2, (Z3_ast[]){at_u, at_v});
+                        if (tn_node_has_action(reseau, noeud, push_6_6)){
+                            Z3_ast x_noeud_suiv = tn_path_variable(ctx, noeud_suiv, i + 1, haut + 1);
+                            Z3_ast transition = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud, x_noeud_suiv});
                             
                             int num_conds = 1;
-                            Z3_ast conds[stack_size * 2 + 1];
-                            conds[0] = tn_6_variable(ctx, i + 1, h + 1);
+                            Z3_ast conds[taille_max_pile * 2 + 1];
+                            conds[0] = tn_6_variable(ctx, i + 1, haut + 1);
                             
-                            for (int k = 0; k <= h; k++)
-                            {
+                            for (int k = 0; k <= haut; k++){
                                 conds[num_conds++] = Z3_mk_eq(ctx, tn_4_variable(ctx, i, k), tn_4_variable(ctx, i + 1, k));
                                 conds[num_conds++] = Z3_mk_eq(ctx, tn_6_variable(ctx, i, k), tn_6_variable(ctx, i + 1, k));
                             }
@@ -765,18 +646,16 @@ Z3_ast create_stack_evolution_constraint(Z3_context ctx, TunnelNetwork network, 
                     }
                     
                     // POP: retire le sommet
-                    if (h > 0 && (tn_node_has_action(network, u, pop_4_4) || tn_node_has_action(network, u, pop_4_6) ||
-                                  tn_node_has_action(network, u, pop_6_4) || tn_node_has_action(network, u, pop_6_6)))
-                    {
-                        Z3_ast at_v = tn_path_variable(ctx, v, i + 1, h - 1);
-                        Z3_ast transition = Z3_mk_and(ctx, 2, (Z3_ast[]){at_u, at_v});
+                    if (haut > 0 && (tn_node_has_action(reseau, noeud, pop_4_4) || tn_node_has_action(reseau, noeud, pop_4_6) ||
+                                  tn_node_has_action(reseau, noeud, pop_6_4) || tn_node_has_action(reseau, noeud, pop_6_6))){
+                        Z3_ast x_noeud_suiv = tn_path_variable(ctx, noeud_suiv, i + 1, haut - 1);
+                        Z3_ast transition = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud, x_noeud_suiv});
                         
                         // La pile en-dessous reste identique
                         int num_preserved = 0;
-                        Z3_ast preserved[stack_size * 2];
+                        Z3_ast preserved[taille_max_pile * 2];
                         
-                        for (int k = 0; k < h; k++)
-                        {
+                        for (int k = 0; k < haut; k++){
                             preserved[num_preserved++] = Z3_mk_eq(ctx, tn_4_variable(ctx, i, k), tn_4_variable(ctx, i + 1, k));
                             preserved[num_preserved++] = Z3_mk_eq(ctx, tn_6_variable(ctx, i, k), tn_6_variable(ctx, i + 1, k));
                         }
@@ -791,43 +670,42 @@ Z3_ast create_stack_evolution_constraint(Z3_context ctx, TunnelNetwork network, 
     return Z3_mk_and(ctx, num_constraints, all_constraints);
 }
 /**
- * @brief Creates constraint φ₈: Simple path (no node visited twice)
- * 
- * @param ctx Z3 context
- * @param network The tunnel network
- * @param length Path length
- * @return Z3_ast The constraint formula
+ * @brief Crée la contrainte φ₈ : chemin simple (pas de nœud visité deux fois)
+ *
+ * Garantit qu’aucun état (nœud, hauteur) n’est visité à plus d’une position
+ * le long du chemin dans le réseau.
+ *
+ * @param ctx Contexte Z3
+ * @param reseau Réseau de tunnels
+ * @param length Longueur du chemin
+ * @return Z3_ast Formule φ₈ représentant la contrainte
  */
-Z3_ast create_simple_path_constraint(Z3_context ctx, TunnelNetwork network, int length)
-{
-    int num_nodes = tn_get_num_nodes(network);
-    int stack_size = get_stack_size(length);
+
+Z3_ast create_simple_path_constraint(Z3_context ctx, TunnelNetwork reseau, int length){
+    int nombre_noeuds= tn_get_num_nodes(reseau);
+    int taille_max_pile= get_stack_size(length);
     
-    int num_constraints = 0;
-    Z3_ast all_constraints[num_nodes * length * length * stack_size];
+    int nombre_contraintes = 0;
+    Z3_ast toutes_contraintes[nombre_noeuds * length * length * taille_max_pile];
     
-    // Pour chaque nœud u et hauteur h (un ÉTAT complet)
-    for (int u = 0; u < num_nodes; u++)
-    {
-        for (int h = 0; h < stack_size; h++)
-        {
+    // Pour chaque nœud noeud et hauteur haut 
+    for (int noeud= 0; noeud< nombre_noeuds; noeud++){
+        for (int h = 0; h < taille_max_pile; h++){
             // Pour chaque paire de positions i < j
-            for (int i = 0; i <= length; i++)
-            {
-                for (int j = i + 1; j <= length; j++)
-                {
-                    // On ne peut pas être dans le MÊME ÉTAT (u,h) à deux positions différentes
-                    Z3_ast at_i = tn_path_variable(ctx, u, i, h);
-                    Z3_ast at_j = tn_path_variable(ctx, u, j, h);
-                    Z3_ast both = Z3_mk_and(ctx, 2, (Z3_ast[]){at_i, at_j});
+            for (int i = 0; i <= length; i++){
+                for (int j = i + 1; j <= length; j++){
+                    // On ne peut pas être dans le MÊME ÉTAT (noeud,haut) à deux positions différentes
+                    Z3_ast x_noeud_i = tn_path_variable(ctx, noeud, i, h);
+                    Z3_ast x_noeud_j = tn_path_variable(ctx, noeud, j, h);
+                    Z3_ast both = Z3_mk_and(ctx, 2, (Z3_ast[]){x_noeud_i, x_noeud_j});
                     
-                    all_constraints[num_constraints++] = Z3_mk_not(ctx, both);
+                    toutes_contraintes[nombre_contraintes++] = Z3_mk_not(ctx, both);
                 }
             }
         }
     }
     
-    return Z3_mk_and(ctx, num_constraints, all_constraints);
+    return Z3_mk_and(ctx, nombre_contraintes, toutes_contraintes);
 }
 
 //((((((((((((((((()))))))))))))))))
