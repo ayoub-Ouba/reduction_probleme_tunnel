@@ -709,8 +709,7 @@ Z3_ast create_simple_path_constraint(Z3_context ctx, TunnelNetwork reseau, int l
 }
 
 //((((((((((((((((()))))))))))))))))
-Z3_ast tn_reduction(Z3_context ctx, const TunnelNetwork network, int length)
-{
+Z3_ast tn_reduction(Z3_context ctx, const TunnelNetwork network, int length){
      printf("=== DEBUT tn_reduction, length=%d ===\n", length);
     printf("Noeud initial: %d (%s)\n", tn_get_initial(network), tn_get_node_name(network, tn_get_initial(network)));
     printf("Noeud final: %d (%s)\n", tn_get_final(network), tn_get_node_name(network, tn_get_final(network)));
@@ -719,13 +718,13 @@ Z3_ast tn_reduction(Z3_context ctx, const TunnelNetwork network, int length)
     // Afficher toutes les arêtes
     int num_nodes = tn_get_num_nodes(network);
     printf("Arêtes:\n");
-    for (int u = 0; u < num_nodes; u++)
+    for (int noeud = 0; noeud < num_nodes; noeud++)
     {
-        for (int v = 0; v < num_nodes; v++)
+        for (int noeud_suiv = 0; noeud_suiv < num_nodes; noeud_suiv++)
         {
-            if (tn_is_edge(network, u, v))
+            if (tn_is_edge(network, noeud, noeud_suiv))
             {
-                printf("  %s -> %s\n", tn_get_node_name(network, u), tn_get_node_name(network, v));
+                printf("  %s -> %s\n", tn_get_node_name(network, noeud), tn_get_node_name(network, noeud_suiv));
             }
         }
     }
@@ -746,8 +745,6 @@ Z3_ast tn_reduction(Z3_context ctx, const TunnelNetwork network, int length)
     printf("Création phi_4...\n");
     fflush(stdout);
     Z3_ast phi_4 = creer_contrainte_pile_bien_definie(ctx, network, length);
-    
-    // PAS de phi_5 ici - il est intégré dans phi_3
     
     printf("Création phi_6...\n");
     fflush(stdout);
